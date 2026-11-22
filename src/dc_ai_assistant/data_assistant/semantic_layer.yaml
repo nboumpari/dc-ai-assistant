@@ -109,9 +109,9 @@ tables:
       order_id: {description: "Order number, e.g. O-000123."}
       customer_id: {description: Customer who ordered.}
       warehouse_id: {description: DC that ships the order (the customer's home DC).}
-      order_date: {description: When the order was placed.}
-      requested_delivery_date: {description: Date the customer wants the delivery.}
-      cutoff_time: {description: Latest time the order should leave the DC.}
+      order_date: {description: "When the order was placed. Despite the name this is a full timestamp ('YYYY-MM-DD HH:MM:SS'), so use date(order_date) or an upper bound like '2025-12-31 23:59:59' when filtering by day."}
+      requested_delivery_date: {description: "Date the customer wants the delivery ('YYYY-MM-DD', no time)."}
+      cutoff_time: {description: "Latest date and time the order should leave the DC. Despite the name this is a full timestamp ('YYYY-MM-DD HH:MM:SS'), so compare it directly with shipments.actual_ship_at."}
       status:
         description: Order status at the end of 2025.
         values: [open, picked, shipped, delivered, cancelled]
