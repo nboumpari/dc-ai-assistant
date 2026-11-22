@@ -194,6 +194,16 @@ class Simulation:
         weekdays = sorted(config.PLANT_PRODUCTION_WEEKDAYS)
         self.production_weekday = {p.sku: weekdays[i % len(weekdays)] for i, p in enumerate(md.products)}
 
+        # Typical order line size per product: best sellers are ordered in bigger quantities
+        mean_pop = sum(p.popularity for p in md.products) / len(md.products)
+        self.typical_line_cases = {
+            p.sku: min(
+                config.LINE_QTY_MAX_TYPICAL_CASES,
+                max(config.LINE_QTY_MIN_CASES, config.AVG_CASES_PER_LINE * (p.popularity / mean_pop) ** 0.5),
+            )
+            for p in md.products
+        }
+
         # Expected daily demand per DC and product (before seasonality)
         self.base_demand = self._expected_demand()
 
@@ -224,15 +234,25 @@ class Simulation:
     def _expected_demand(self) -> dict[str, dict[str, float]]:
         total_pop = sum(p.popularity for p in self.md.products)
         avg_lines = (config.ORDER_LINES_MIN + config.ORDER_LINES_MAX) / 2
-        avg_cases = (config.CASES_PER_LINE_MIN + config.CASES_PER_LINE_MAX) / 2
         operating = [f for f in config.WEEKDAY_FACTOR.values() if f > 0]
         avg_weekday = sum(operating) / len(operating)
         demand: dict[str, dict[str, float]] = {dc: defaultdict(float) for dc in config.DC_IDS}
         for c in self.md.customers:
             orders_per_day = config.DAILY_ORDER_PROB * c.order_frequency * avg_weekday
             for p in self.md.products:
-                demand[c.home_dc][p.sku] += orders_per_day * avg_lines * avg_cases * p.popularity / total_pop
+                line_share = p.popularity / total_pop
+                demand[c.home_dc][p.sku] += orders_per_day * avg_lines * line_share * self.typical_line_cases[p.sku]
         return demand
+
+    def line_quantity(self, sku: str) -> int:
+        sigma = config.LINE_QTY_VARIATION
+        qty = self.typical_line_cases[sku] * self.rng.lognormvariate(-(sigma**2) / 2, sigma)
+        return max(config.LINE_QTY_MIN_CASES, round(qty))
+
+    def dc_target(self, dc: str, sku: str, d: date) -> float:
+        """Stock a DC aims to hold: days of cover, but never below the safety floor."""
+        cover = self.daily_demand(dc, sku, d) * config.DC_TARGET_DAYS_OF_COVER[dc]
+        return max(cover, config.DC_MIN_STOCK_LINES * self.typical_line_cases[sku])
 
     def season_factor(self, category: str, d: date) -> float:
         f = 1.0
@@ -277,11 +297,11 @@ class Simulation:
             produced = at(date(2024, 12, self.rng.randint(2, 20)), self.rng.randint(6, 14))
             network = self.network_demand(p.sku, start)
             total = round(network * config.PLANT_TARGET_DAYS_OF_COVER) + sum(
-                round(self.daily_demand(dc, p.sku, start) * config.DC_TARGET_DAYS_OF_COVER[dc]) for dc in config.DC_IDS
+                round(self.dc_target(dc, p.sku, start)) for dc in config.DC_IDS
             )
             self.produce(p.sku, produced, max(total, p.cases_per_layer))
             for dc in config.DC_IDS:
-                qty = round(self.daily_demand(dc, p.sku, start) * config.DC_TARGET_DAYS_OF_COVER[dc])
+                qty = round(self.dc_target(dc, p.sku, start))
                 taken = self.stock.take(config.PLANT_ID, p.sku, qty)
                 for lot_taken, n in taken:
                     self.stock.add(dc, p.sku, lot_taken, n)
@@ -487,12 +507,7 @@ class Simulation:
             n_lines = self.rng.randint(config.ORDER_LINES_MIN, config.ORDER_LINES_MAX)
             skus = list(dict.fromkeys(self.rng.choices(self.popularity_skus, weights, k=n_lines)))
             order_id = self.new_id("O", 6)
-            lines = [
-                OrderLine(
-                    self.new_id("OL", 7), sku, self.rng.randint(config.CASES_PER_LINE_MIN, config.CASES_PER_LINE_MAX)
-                )
-                for sku in skus
-            ]
+            lines = [OrderLine(self.new_id("OL", 7), sku, self.line_quantity(sku)) for sku in skus]
             order = Order(
                 order_id=order_id,
                 customer=c,
@@ -811,7 +826,7 @@ class Simulation:
         for dc in config.DC_IDS:
             groups: dict[str, list[TransferLine]] = defaultdict(list)
             for p in self.md.products:
-                target = self.daily_demand(dc, p.sku, d + timedelta(days=5)) * config.DC_TARGET_DAYS_OF_COVER[dc]
+                target = self.dc_target(dc, p.sku, d + timedelta(days=5))
                 build_up = self.peak_build_up(p.sku, d)
                 if build_up:
                     target *= 1.6
@@ -838,7 +853,7 @@ class Simulation:
                 if daily <= 0:
                     continue
                 position = self.stock.total(dc, p.sku) + self.in_transit[(dc, p.sku)]
-                if position >= daily * config.REBALANCE_TRIGGER_DAYS:
+                if position >= max(daily * config.REBALANCE_TRIGGER_DAYS, self.typical_line_cases[p.sku]):
                     continue
                 best, best_cover = None, config.REBALANCE_SOURCE_MIN_DAYS
                 for src in config.DC_IDS:
@@ -957,7 +972,7 @@ class Simulation:
         if (
             t.dest == config.STOCKOUT_DC
             and holds_category
-            and config.STOCKOUT_START - timedelta(days=5) <= d <= config.STOCKOUT_END
+            and config.STOCKOUT_START - timedelta(days=config.STOCKOUT_HOLD_DAYS_BEFORE) <= d <= config.STOCKOUT_END
         ):
             released = at(config.STOCKOUT_END + timedelta(days=1), 6, self.rng.randint(0, 59))
             self.shipment_event(

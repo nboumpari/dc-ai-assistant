@@ -126,7 +126,13 @@ CARRIERS = [
 # Average chance that a customer places an order on a working day.
 DAILY_ORDER_PROB = 0.35
 ORDER_LINES_MIN, ORDER_LINES_MAX = 2, 12
-CASES_PER_LINE_MIN, CASES_PER_LINE_MAX = 10, 120
+# Cases per order line: best sellers are ordered in bigger quantities than slow movers.
+# A line's typical size = AVG_CASES_PER_LINE x sqrt(product popularity / average popularity),
+# with natural variation around it.
+AVG_CASES_PER_LINE = 65
+LINE_QTY_VARIATION = 0.45  # spread of a lognormal distribution
+LINE_QTY_MIN_CASES = 2
+LINE_QTY_MAX_TYPICAL_CASES = 140  # cap on a product's typical line size
 
 # Demand multiplier by weekday (Mon=0 ... Sun=6). No deliveries on Sunday.
 WEEKDAY_FACTOR = {0: 1.25, 1: 1.05, 2: 1.0, 3: 1.0, 4: 0.95, 5: 0.35, 6: 0.0}
@@ -150,6 +156,9 @@ HOLIDAYS = {
 # Stock policy, in days of expected demand.
 # Plant -> DC: on plant shipment days each DC is topped up to its target cover.
 DC_TARGET_DAYS_OF_COVER = {"ATH": 10, "THE": 16, "PAT": 10}  # THE (3PL) has spare space
+# Safety floor: each DC keeps at least this many typical order lines of every product,
+# so slow movers do not run out when one customer places a large order.
+DC_MIN_STOCK_LINES = 5
 PLANT_TARGET_DAYS_OF_COVER = 14  # plant production tops plant stock up to this
 # DC -> DC: a DC asks another DC for stock when it drops below this...
 REBALANCE_TRIGGER_DAYS = 3
@@ -198,10 +207,11 @@ STOCKOUT_DC = "ATH"
 STOCKOUT_CATEGORY = "Baby care"
 STOCKOUT_START = date(2025, 8, 4)
 STOCKOUT_END = date(2025, 8, 10)
+STOCKOUT_HOLD_DAYS_BEFORE = 7  # transfers are held from this many days before the stockout week
 
 # 5. One transfer lane loses cases in transit.
 LOSSY_LANE = ("THE", "ATH")
-LOSSY_LANE_LOSS_PROB = 0.12  # chance a transfer line arrives short
+LOSSY_LANE_LOSS_PROB = 0.03  # chance a transfer line arrives short
 
 # 6. Long dock waits at one DC in the morning peak.
 SLOW_DOCK_DC = "ATH"
