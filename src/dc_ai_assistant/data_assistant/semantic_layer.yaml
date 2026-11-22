@@ -182,7 +182,7 @@ tables:
       sku: {description: Product returned.}
       batch_lot: {description: Batch of the returned goods.}
       qty_requested_cases: {description: Cases the customer said they were returning.}
-      qty_received_cases: {description: Cases that actually arrived at the DC. 0 until received.}
+      qty_received_cases: {description: "Cases that actually arrived at the DC. 0 means not received yet, so lines with 0 are left out when comparing received and requested quantities."}
       condition:
         description: Result of inspection at the DC. NULL until inspected.
         values: [sellable, damaged packaging, damaged product, expired]
@@ -354,6 +354,7 @@ business_terms:
   batch / lot: A production batch, production_batches.batch_lot.
   trace a batch: Follow batch_lot through pallet_contents to pallets, shipments and orders to find who received it.
   short shipped: An order line with qty_shipped_cases < qty_ordered_cases.
+  fill rate: Case fill rate of customer orders - cases shipped / cases ordered (order_lines.qty_shipped_cases / qty_ordered_cases), usually as a percent. Not the same as the in-full KPI, which is per order.
   stockout: A product with qty_on_hand_cases = 0 at a site on a day (inventory).
   refusal / refused pallet: A pallet with a 'rejected' scan in pallet_events; it also appears as a return with return_type 'refused at delivery'.
   transit loss: Transfer cases shipped but not received (qty_shipped_cases - qty_received_cases on received transfers).
