@@ -1,4 +1,4 @@
-"""Agent loop tests with a scripted fake OpenAI client: no API calls, fully repeatable."""
+"""Agent loop tests with a scripted fake OpenAI Responses client: no API calls, fully repeatable."""
 
 import json
 from types import SimpleNamespace
@@ -9,13 +9,24 @@ from dc_ai_assistant.data_assistant.agent import ask, build_data_agent, build_sy
 from dc_ai_assistant.data_assistant.sql_tool import SQLTool
 
 
+class Item(SimpleNamespace):
+    """An output item of the Responses API."""
+
+    def model_dump(self, exclude_none=False):
+        return {k: v for k, v in vars(self).items() if not (exclude_none and v is None)}
+
+
 def tool_call(name, args, call_id):
     arguments = args if isinstance(args, str) else json.dumps(args)
-    return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=arguments))
+    return Item(type="function_call", call_id=call_id, name=name, arguments=arguments)
 
 
-def reply(*calls, content=None):
-    return SimpleNamespace(content=content, tool_calls=list(calls) or None)
+def reply(*items, text=None, reasoning=True):
+    output = [Item(type="reasoning", id="rs_1", summary=[])] if reasoning else []
+    output += list(items)
+    if text is not None:
+        output.append(Item(type="message", role="assistant", content=[{"type": "output_text", "text": text}]))
+    return output
 
 
 def sql(query, call_id="q1"):
@@ -28,20 +39,21 @@ def submit(behavior, answer, sql_text=None, call_id="s1"):
 
 
 class FakeOpenAI:
-    """Mimics client.chat.completions.create: returns scripted messages and records each request."""
+    """Mimics client.responses.create: returns scripted output items and records each request."""
 
     def __init__(self, replies):
         self.replies = list(replies)
         self.requests: list[dict] = []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self.responses = SimpleNamespace(create=self._create)
 
     def _create(self, **kwargs):
-        self.requests.append(kwargs)
-        message = self.replies.pop(0) if self.replies else submit("answer", "out of script")
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        self.requests.append({**kwargs, "input": list(kwargs["input"])})
+        output = self.replies.pop(0) if self.replies else submit("answer", "out of script")
+        return SimpleNamespace(output=output)
 
     def last_tool_reply(self, request=-1):
-        return [m for m in self.requests[request]["messages"] if m["role"] == "tool"][-1]["content"]
+        outputs = [i for i in self.requests[request]["input"] if i.get("type") == "function_call_output"]
+        return outputs[-1]["output"]
 
 
 @pytest.fixture
@@ -70,9 +82,10 @@ def test_request_settings(sql_tool):
     client, _ = run([submit("clarify", "Which rate?")], sql_tool=sql_tool)
     request = client.requests[0]
     assert request["tool_choice"] == "required"
-    assert [t["function"]["name"] for t in request["tools"]] == ["run_sql", "submit_answer"]
-    assert request["temperature"] == 0
-    assert request["messages"][0]["role"] == "system"
+    assert [t["name"] for t in request["tools"]] == ["run_sql", "submit_answer"]
+    assert request["reasoning"] == {"effort": "low"}
+    assert "temperature" not in request  # not allowed together with reasoning
+    assert "### pallets" in request["instructions"]
 
 
 def test_clarify_without_queries(sql_tool):
@@ -116,7 +129,7 @@ def test_broken_json_arguments_are_sent_back(sql_tool):
 
 
 def test_plain_text_reply_becomes_the_answer(sql_tool):
-    _, result = run([reply(content="Just text")], sql_tool=sql_tool)
+    _, result = run([reply(text="Just text")], sql_tool=sql_tool)
     assert result["answer"] == "Just text"
 
 
@@ -125,7 +138,7 @@ def test_follow_up_sees_the_history(sql_tool):
     agent = build_data_agent(client=client, sql_tool=sql_tool)
     first = ask("Q1", agent=agent)
     ask("And for Patras?", history=first["messages"], agent=agent)
-    sent = [m.get("content") for m in client.requests[1]["messages"]]
+    sent = [m.get("content") for m in client.requests[1]["input"]]
     assert "Q1" in sent and "first" in sent and "And for Patras?" in sent
 
 
@@ -134,3 +147,10 @@ def test_system_prompt_is_filled_in():
     assert "{" + "semantic_layer}" not in prompt and "{" + "max_queries}" not in prompt
     assert "at most 6 queries" in prompt
     assert "### pallets" in prompt
+
+
+def test_reasoning_items_are_sent_back(sql_tool):
+    client, _ = run([sql("SELECT 1"), submit("answer", "ok")], sql_tool=sql_tool)
+    second_input = client.requests[1]["input"]
+    types = [i.get("type") for i in second_input]
+    assert types[-3:] == ["reasoning", "function_call", "function_call_output"]

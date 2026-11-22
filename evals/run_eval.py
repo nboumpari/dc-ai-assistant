@@ -2,8 +2,11 @@
 
 Run from the project root:
 
-    uv run python -m evals.run_eval              # dev split (use while improving the prompt)
-    uv run python -m evals.run_eval --split test # test split (final score only)
+    uv run python -m evals.run_eval --label v2               # dev split (use while improving the prompt)
+    uv run python -m evals.run_eval --label v2 --split test  # test split (final score only)
+
+The label names the prompt version (see prompts/CHANGELOG.md) and appears in
+the experiment name, e.g. data-agent-v2-dev-1a2b3c4d.
 
 Scoring looks at results only, never at the wording of the answer:
 
@@ -23,6 +26,7 @@ from langsmith import Client, evaluate
 
 from dc_ai_assistant import settings
 from dc_ai_assistant.data_assistant.agent import PROMPT_PATH, ask, build_data_agent
+from dc_ai_assistant.data_assistant.semantic_layer import SEMANTIC_LAYER_PATH
 from dc_ai_assistant.data_assistant.sql_tool import SQLTool
 from evals.compare import load_aliases, results_match
 from evals.upload_golden_set import DATASET_NAME
@@ -56,7 +60,9 @@ def behavior_match(outputs: dict, reference_outputs: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--label", required=True, help="prompt version, e.g. v2 (see prompts/CHANGELOG.md)")
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
+    parser.add_argument("--repetitions", type=int, default=3, help="runs per question (answers vary between runs)")
     args = parser.parse_args()
 
     agent = build_data_agent()
@@ -67,47 +73,61 @@ def main() -> int:
 
     client = Client()
     examples = list(client.list_examples(dataset_name=DATASET_NAME, splits=[args.split]))
-    prompt_version = hashlib.sha256(PROMPT_PATH.read_bytes()).hexdigest()[:8]
+    # fingerprint of everything the model is told: the prompt template and the semantic layer
+    prompt_version = hashlib.sha256(PROMPT_PATH.read_bytes() + SEMANTIC_LAYER_PATH.read_bytes()).hexdigest()[:8]
 
     results = evaluate(
         target,
         data=examples,
         evaluators=[correct, behavior_match],
-        experiment_prefix=f"data-agent-{args.split}",
+        experiment_prefix=f"data-agent-{args.label}-{args.split}",
         description=(
-            f"Data agent on the {args.split} split, model {settings.OPENAI_MODEL}, "
-            f"temperature {settings.OPENAI_TEMPERATURE}, prompt {prompt_version}"
+            f"Data agent {args.label} on the {args.split} split, model {settings.OPENAI_MODEL}, "
+            f"reasoning {settings.OPENAI_REASONING_EFFORT}, temperature {settings.EFFECTIVE_TEMPERATURE}, "
+            f"prompt {prompt_version}"
         ),
         metadata={
             "model": settings.OPENAI_MODEL,
-            "temperature": settings.OPENAI_TEMPERATURE,
+            "temperature": settings.EFFECTIVE_TEMPERATURE,
             "reasoning_effort": settings.OPENAI_REASONING_EFFORT,
             "prompt_version": prompt_version,
+            "version": args.label,
             "split": args.split,
+            "repetitions": args.repetitions,
         },
-        max_concurrency=4,
+        num_repetitions=args.repetitions,
+        max_concurrency=8,
         client=client,
     )
 
-    by_stratum: dict[str, list[int]] = defaultdict(list)
-    failures = []
+    # one row per question per repetition
+    per_question: dict[str, list[int]] = defaultdict(list)
+    stratum_of: dict[str, str] = {}
+    last_comment: dict[str, str] = {}
     for row in results:
-        scores = {r.key: r.score for r in row["evaluation_results"]["results"]}
         meta = row["example"].metadata
-        by_stratum[meta["stratum"]].append(scores.get("correct", 0))
-        if not scores.get("correct"):
-            comment = next((r.comment for r in row["evaluation_results"]["results"] if r.key == "correct"), "")
-            failures.append((meta["golden_id"], comment))
+        correct_result = next(r for r in row["evaluation_results"]["results"] if r.key == "correct")
+        per_question[meta["golden_id"]].append(int(correct_result.score or 0))
+        stratum_of[meta["golden_id"]] = meta["stratum"]
+        if not correct_result.score:
+            last_comment[meta["golden_id"]] = correct_result.comment or ""
 
-    total = [s for scores in by_stratum.values() for s in scores]
+    runs = [s for scores in per_question.values() for s in scores]
     print(f"\nExperiment: {results.experiment_name}")
-    print(f"Correct: {sum(total)}/{len(total)} = {100 * sum(total) / len(total):.0f}%\n")
+    print(
+        f"Correct: {sum(runs)}/{len(runs)} runs = {100 * sum(runs) / len(runs):.1f}% "
+        f"({len(per_question)} questions x {args.repetitions} repetitions)\n"
+    )
+    by_stratum: dict[str, list[int]] = defaultdict(list)
+    for golden_id, scores in per_question.items():
+        by_stratum[stratum_of[golden_id]] += scores
     for stratum, scores in sorted(by_stratum.items()):
         print(f"  {stratum:<14} {sum(scores)}/{len(scores)}")
-    if failures:
-        print("\nFailed:")
-        for golden_id, comment in sorted(failures):
-            print(f"  {golden_id}: {comment}")
+    unstable = {q: s for q, s in per_question.items() if sum(s) < len(s)}
+    if unstable:
+        print("\nNot always correct (passed / runs):")
+        for golden_id, scores in sorted(unstable.items()):
+            print(f"  {golden_id}: {sum(scores)}/{len(scores)}  last failure: {last_comment.get(golden_id, '')[:110]}")
     return 0
 
 

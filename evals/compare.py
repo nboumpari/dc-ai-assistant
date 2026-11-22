@@ -7,12 +7,14 @@ tolerant of presentation:
 - numbers match within 1% (or 0.05), and 0.775 matches 77.5 (fraction vs percent)
 - '2025-08', '08', 8, 'August' and 'Aug' all match the same month
 - 'Monday' matches SQLite's weekday number 1 (strftime('%w'): 0 = Sunday)
+- a week's Monday date ('2025-08-04') matches SQLite's week number for it (strftime('%W'): 31)
 - an id matches its name when aliases are given, e.g. 'CAR03' = 'Hermes Freight'
 - text is compared case-insensitively, ignoring surrounding spaces
 """
 
 import math
 import re
+from datetime import date
 from typing import Any
 
 MONTHS = {
@@ -76,9 +78,24 @@ def _calendar_match(expected: Any, actual: Any, names: dict[str, int], pattern: 
     return number is not None and number == (e if e is not None else a)
 
 
+def _week_match(expected: Any, actual: Any) -> bool | None:
+    """If the expected value is a Monday date and the actual value a plain number, compare week numbers."""
+    if not (isinstance(expected, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", expected.strip())):
+        return None
+    day = date.fromisoformat(expected.strip())
+    number = _number(actual)
+    if day.weekday() != 0 or number is None or isinstance(actual, str) and "-" in actual:
+        return None
+    return number == int(day.strftime("%W"))
+
+
 def values_match(expected: Any, actual: Any, aliases: Aliases | None = None) -> bool:
     if expected is None or actual is None:
         return expected is None and actual is None
+
+    week = _week_match(expected, actual)
+    if week is not None:
+        return week
 
     for names, pattern in ((MONTHS, r"\d{4}-(\d{2})"), (WEEKDAYS, None)):
         calendar = _calendar_match(expected, actual, names, pattern)

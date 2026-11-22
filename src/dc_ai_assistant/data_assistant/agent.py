@@ -2,13 +2,18 @@
 
     question -> agent (LLM) -> run_sql -> agent -> ... -> submit_answer -> done
 
-The agent node calls the OpenAI API directly (no LangChain). The model must
-call a tool on every turn: run_sql to query the database, or submit_answer to
-finish. submit_answer's arguments are the structured response (behavior,
-answer, sql, assumptions), so no extra call is needed to format the result.
-Messages are plain OpenAI-format dicts. The OpenAI client is wrapped for
-LangSmith, so every model call appears in the traces. The graph is compiled on
-its own so the supervisor can use it as a subgraph later.
+The agent node calls OpenAI's Responses API directly (no LangChain). The
+Responses API is needed because this model only allows tools together with
+reasoning there. The model must call a tool on every turn: run_sql to query
+the database, or submit_answer to finish. submit_answer's arguments are the
+structured response (behavior, answer, sql, assumptions).
+
+The conversation is kept as a list of Responses API input items: user and
+assistant messages, the model's reasoning and function calls, and the tool
+results. Reasoning items are passed back on every turn so the model keeps its
+train of thought. The OpenAI client is wrapped for LangSmith, so every model
+call appears in the traces. The graph is compiled on its own so the supervisor
+can use it as a subgraph later.
 """
 
 import json
@@ -26,7 +31,7 @@ from dc_ai_assistant.data_assistant.sql_tool import SQLTool
 PROMPT_PATH = Path(__file__).with_name("prompts") / "system.md"
 MAX_QUERIES = 6
 
-Message = dict[str, Any]  # OpenAI chat message
+Item = dict[str, Any]  # a Responses API input item
 
 
 class DataAgentResponse(BaseModel):
@@ -44,29 +49,27 @@ class DataAgentResponse(BaseModel):
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "run_sql",
-            "description": "Run one read-only SQLite SELECT query on the warehouse database and return the result.",
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "A single SQLite SELECT statement."}},
-                "required": ["query"],
-            },
+        "name": "run_sql",
+        "description": "Run one read-only SQLite SELECT query on the warehouse database and return the result.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "A single SQLite SELECT statement."}},
+            "required": ["query"],
         },
+        "strict": False,
     },
     {
         "type": "function",
-        "function": {
-            "name": "submit_answer",
-            "description": "Submit the final answer to the user. Call this exactly once, as the last step.",
-            "parameters": DataAgentResponse.model_json_schema(),
-        },
+        "name": "submit_answer",
+        "description": "Submit the final answer to the user. Call this exactly once, as the last step.",
+        "parameters": DataAgentResponse.model_json_schema(),
+        "strict": False,
     },
 ]
 
 
 class DataAgentState(TypedDict):
-    messages: Annotated[list[Message], operator.add]
+    messages: Annotated[list[Item], operator.add]
     queries_run: int
     turns: int
     response: dict[str, Any] | None
@@ -77,65 +80,57 @@ def build_system_prompt(max_queries: int = MAX_QUERIES) -> str:
     return template.replace("{max_queries}", str(max_queries)).replace("{semantic_layer}", render_semantic_layer())
 
 
-def _assistant_message(message) -> Message:
-    """Convert the SDK's response message into a plain dict we can send back."""
-    out: Message = {"role": "assistant", "content": message.content}
-    if message.tool_calls:
-        out["tool_calls"] = [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {"name": call.function.name, "arguments": call.function.arguments},
-            }
-            for call in message.tool_calls
-        ]
-    return out
+def _function_calls(items: list[Item]) -> list[Item]:
+    return [i for i in items if i.get("type") == "function_call"]
 
 
 def build_data_agent(client=None, sql_tool: SQLTool | None = None, max_queries: int = MAX_QUERIES):
     client = client or _default_client()
     sql_tool = sql_tool or SQLTool()
-    system: Message = {"role": "system", "content": build_system_prompt(max_queries)}
+    instructions = build_system_prompt(max_queries)
     max_turns = max_queries + 3
-    model_params: dict[str, Any] = {"model": settings.OPENAI_MODEL, "temperature": settings.OPENAI_TEMPERATURE}
-    if settings.OPENAI_REASONING_EFFORT:
-        model_params["reasoning_effort"] = settings.OPENAI_REASONING_EFFORT
+    model_params: dict[str, Any] = {
+        "model": settings.OPENAI_MODEL,
+        "reasoning": {"effort": settings.OPENAI_REASONING_EFFORT},
+    }
+    if settings.OPENAI_REASONING_EFFORT == "none":  # the API accepts a temperature only without reasoning
+        model_params["temperature"] = settings.OPENAI_TEMPERATURE
 
     def agent(state: DataAgentState) -> dict:
-        completion = client.chat.completions.create(
-            messages=[system, *state["messages"]], tools=TOOLS, tool_choice="required", **model_params
+        response = client.responses.create(
+            instructions=instructions, input=state["messages"], tools=TOOLS, tool_choice="required", **model_params
         )
-        return {"messages": [_assistant_message(completion.choices[0].message)], "turns": state.get("turns", 0) + 1}
+        output = [item.model_dump(exclude_none=True) for item in response.output]
+        return {"messages": output, "turns": state.get("turns", 0) + 1}
 
     def tools(state: DataAgentState) -> dict:
-        calls = state["messages"][-1].get("tool_calls", [])
+        calls = _function_calls(state["messages"][-_last_turn_size(state["messages"]) :])
         queries = state.get("queries_run", 0)
         response = None
-        replies: list[Message] = []
+        replies: list[Item] = []
         # run queries first, so an answer submitted in the same turn comes last
-        for call in sorted(calls, key=lambda c: c["function"]["name"] == "submit_answer"):
-            name = call["function"]["name"]
+        for call in sorted(calls, key=lambda c: c["name"] == "submit_answer"):
             try:
-                args = json.loads(call["function"]["arguments"] or "{}")
+                args = json.loads(call.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = None
             if args is None:
                 content = "The tool arguments were not valid JSON. Call the tool again."
-            elif name == "run_sql":
+            elif call["name"] == "run_sql":
                 if queries >= max_queries:
                     content = f"Query limit of {max_queries} reached. Call submit_answer now with what you have."
                 else:
                     content = sql_tool.run(args.get("query", "")).to_text()
                     queries += 1
-            elif name == "submit_answer":
+            elif call["name"] == "submit_answer":
                 try:
                     response = DataAgentResponse(**args).model_dump()
                     content = "Answer submitted."
                 except ValidationError as exc:
                     content = f"Invalid answer, call submit_answer again: {exc.errors()[0]['msg']}"
             else:
-                content = f"Unknown tool '{name}'. Use run_sql or submit_answer."
-            replies.append({"role": "tool", "tool_call_id": call["id"], "content": content})
+                content = f"Unknown tool '{call['name']}'. Use run_sql or submit_answer."
+            replies.append({"type": "function_call_output", "call_id": call["call_id"], "output": content})
 
         update: dict[str, Any] = {"messages": replies, "queries_run": queries}
         if response:
@@ -145,7 +140,14 @@ def build_data_agent(client=None, sql_tool: SQLTool | None = None, max_queries: 
 
     def no_tool_call(state: DataAgentState) -> dict:
         """The model replied with plain text instead of a tool call: use it as the answer."""
-        text = state["messages"][-1].get("content") or ""
+        texts = [
+            part.get("text", "")
+            for item in state["messages"]
+            if item.get("type") == "message" and item.get("role") == "assistant"
+            for part in item.get("content", [])
+            if isinstance(part, dict)
+        ]
+        text = texts[-1] if texts else ""
         return {"response": DataAgentResponse(behavior="answer", answer=text).model_dump()}
 
     def give_up(state: DataAgentState) -> dict:
@@ -154,7 +156,8 @@ def build_data_agent(client=None, sql_tool: SQLTool | None = None, max_queries: 
         return {"response": response, "messages": [{"role": "assistant", "content": answer}]}
 
     def after_agent(state: DataAgentState) -> str:
-        return "tools" if state["messages"][-1].get("tool_calls") else "no_tool_call"
+        last_turn = state["messages"][-_last_turn_size(state["messages"]) :]
+        return "tools" if _function_calls(last_turn) else "no_tool_call"
 
     def after_tools(state: DataAgentState) -> str:
         if state.get("response"):
@@ -174,6 +177,16 @@ def build_data_agent(client=None, sql_tool: SQLTool | None = None, max_queries: 
     return graph.compile(name="data_agent")
 
 
+def _last_turn_size(items: list[Item]) -> int:
+    """Number of items the model produced in its latest turn (everything after the last input we sent)."""
+    size = 0
+    for item in reversed(items):
+        if item.get("type") == "function_call_output" or item.get("role") == "user":
+            break
+        size += 1
+    return size or 1
+
+
 def _default_client():
     from langsmith.wrappers import wrap_openai
     from openai import OpenAI
@@ -181,7 +194,7 @@ def _default_client():
     return wrap_openai(OpenAI())
 
 
-def ask(question: str, history: list[Message] | None = None, agent=None) -> dict[str, Any]:
+def ask(question: str, history: list[Item] | None = None, agent=None) -> dict[str, Any]:
     """Ask one question. Returns the structured response plus how many queries were run."""
     agent = agent or build_data_agent()
     state = agent.invoke(

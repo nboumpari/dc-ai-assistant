@@ -664,7 +664,7 @@ questions:
       GROUP BY 1 ORDER BY 2 DESC
 
   - id: P04
-    question: Why did the Athens DC short-ship baby care products in early August?
+    question: In which week was the Athens DC's fill rate for baby care products lowest, and why?
     stratum: pattern
     difficulty: hard
     split: dev

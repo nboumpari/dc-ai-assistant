@@ -32,9 +32,11 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
+# Reasoning effort: none | low | medium | high. "low" lets the model think briefly before each step.
+OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "low")
+# gpt-5 models accept a temperature only when reasoning is "none"; otherwise the API default (1) is used.
 OPENAI_TEMPERATURE = float(os.environ.get("OPENAI_TEMPERATURE", "0"))
-# gpt-5 models accept a temperature only with reasoning off ("none", also the model default)
-OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "none")
+EFFECTIVE_TEMPERATURE = OPENAI_TEMPERATURE if OPENAI_REASONING_EFFORT == "none" else 1.0
 
 WAREHOUSE_DB_PATH = Path(os.environ.get("WAREHOUSE_DB_PATH", PROJECT_ROOT / "data" / "generated" / "warehouse.db"))
 

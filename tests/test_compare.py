@@ -112,3 +112,11 @@ def test_values_mode_accepts_any_shape():
     actual = [["fewest_orders", "2025-08", 494, None], ["highest_no_show_rate", "2025-08", None, 4.12]]
     assert results_match("values", expected, actual)[0]
     assert not results_match("values", expected, [["fewest_orders", "2025-08"]])[0]
+
+
+def test_week_start_date_matches_sqlite_week_number():
+    assert values_match("2025-08-04", "31")  # strftime('%W') for the week of Monday 4 August 2025
+    assert values_match("2025-08-04", 31)
+    assert not values_match("2025-08-04", 32)
+    assert values_match("2025-08-04", "2025-08-04")
+    assert not values_match("2025-08-05", 31)  # only Monday dates stand for a week
