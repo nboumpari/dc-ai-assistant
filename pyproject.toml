@@ -1,0 +1,33 @@
+[project]
+name = "dc-ai-assistant"
+version = "0.1.0"
+description = "Two warehouse AI assistants: a text-to-SQL data assistant and a RAG rules assistant over public standards and regulations."
+readme = "README.md"
+authors = [
+    { name = "nefeliboubari" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+dc-ai-assistant = "dc_ai_assistant:main"
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

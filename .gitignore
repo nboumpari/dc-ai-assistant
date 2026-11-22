@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Generated data (rebuilt by the data generator)
+data/generated/
+
+# Downloaded public documents (fetched by script, not committed)
+data/documents/raw/
+
+# Vector index
+data/index/
+
+# Local design documents (kept out of the public repo)
+docs/
