@@ -7,7 +7,12 @@ authors = [
     { name = "nefeliboubari" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "langgraph>=1.2.24",
+    "langsmith>=0.16.0",
+    "openai>=3.57.0",
+    "pyyaml>=6.0.4",
+]
 
 [project.scripts]
 dc-ai-assistant = "dc_ai_assistant:main"

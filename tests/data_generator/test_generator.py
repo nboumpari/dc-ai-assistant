@@ -6,30 +6,11 @@ first two weeks of January only.
 
 import hashlib
 import random
-import sqlite3
-from datetime import date, datetime, time
-
-import pytest
 
 from scripts.data_generator import config, simulate
-from scripts.data_generator.generate import generate
 from scripts.data_generator.master_data import build_master_data, gs1_check_digit
 
-
-@pytest.fixture
-def two_weeks(monkeypatch):
-    end = date(2025, 1, 14)
-    monkeypatch.setattr(config, "END_DATE", end)
-    monkeypatch.setattr(simulate, "END_TS", datetime.combine(end, time(23, 59, 59)))
-
-
-@pytest.fixture
-def small_db(two_weeks, tmp_path):
-    db, log = tmp_path / "warehouse.db", tmp_path / "injected_errors.csv"
-    counts = generate(db, log)
-    con = sqlite3.connect(db)
-    yield con, counts, log
-    con.close()
+# fixtures two_weeks and small_db live in tests/conftest.py
 
 
 def test_gs1_check_digit_known_values():

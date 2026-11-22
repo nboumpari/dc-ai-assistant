@@ -1,0 +1,571 @@
+# Semantic layer for the warehouse database.
+#
+# Describes what the data means in business terms, so the data assistant can
+# turn planners' questions into correct SQL. A test checks this file against
+# the real database: every table and column must be described here, and
+# every listed value must match the data.
+
+version: 1
+
+database:
+  dialect: SQLite
+  period: 1 January 2025 to 31 December 2025
+  today: "2025-12-31"
+  notes:
+    - The data ends on 31 December 2025. Treat that day as "today", so "last month" means December 2025 and "this year" means 2025.
+    - Timestamps are text in the format 'YYYY-MM-DD HH:MM:SS'. Dates are 'YYYY-MM-DD'. Times of day are 'HH:MM'.
+    - Use date(), time(), datetime(), strftime() and julianday() for date logic. Example - minutes between two timestamps is (julianday(b) - julianday(a)) * 1440.
+    - Weeks start on Monday. The Monday of a date's week is date(d, '-6 days', 'weekday 1'). Do not use date(d, 'weekday 1', '-7 days'), which puts Mondays in the previous week.
+    - Quantities are in cases unless the column name says otherwise. Weights are in kg, heights in cm.
+    - Shipments still on the road at the end of the year have no actual delivery time (NULL).
+
+company:
+  description: A fictional FMCG manufacturer in Greece with one plant and three distribution centres (DCs).
+  flows:
+    - Production - the plant (PLT) makes every product in batches.
+    - Plant to DC - the plant sends stock to the DCs as stock transfers.
+    - DC to DC - a DC that runs low gets stock from another DC (rebalancing transfer).
+    - Customer delivery - each customer is served by one DC, its home DC.
+    - Returns - customers refuse pallets at delivery, or send goods back later.
+
+tables:
+  products:
+    description: Finished goods the company makes and sells.
+    grain: one row per product (SKU)
+    columns:
+      sku: {description: "Product code, e.g. HAI-006. The prefix is the category."}
+      product_name: {description: "Brand, product type and size, e.g. 'Velora Shampoo 400ml'."}
+      brand: {description: Fictional brand name.}
+      category:
+        description: Product category.
+        values: [Laundry, Baby care, Hair care, Oral care, Personal care, Home care]
+      gtin: {description: 13-digit GS1 barcode of the consumer unit.}
+      units_per_case: {description: Consumer units in one case.}
+      cases_per_layer: {description: Cases in one layer of a pallet.}
+      cases_per_pallet: {description: Cases on a full pallet of this product.}
+      case_weight_kg: {description: Weight of one case in kg.}
+      case_height_cm: {description: Height of one case in cm. Pallet height grows by this for every layer.}
+      shelf_life_days: {description: Days from production to best-before date.}
+
+  warehouses:
+    description: Company sites - the plant and the three DCs.
+    grain: one row per site
+    columns:
+      warehouse_id:
+        description: Site code.
+        values: [PLT, ATH, THE, PAT]
+      name: {description: "Site name: Oinofyta Plant, Athens DC, Thessaloniki DC, Patras DC."}
+      city: {description: City of the site.}
+      country: {description: Country of the site.}
+      site_type:
+        description: Plant or distribution centre.
+        values: [plant, DC]
+      operator_type:
+        description: Whether the company runs the site itself or a logistics provider (3PL) runs it.
+        values: [in-house, 3PL]
+      operator_name: {description: Name of the 3PL operator. NULL for in-house sites.}
+
+  customers:
+    description: Customers the company delivers to.
+    grain: one row per customer
+    columns:
+      customer_id: {description: "Customer code, e.g. CUS001."}
+      customer_name: {description: Customer name.}
+      region: {description: Greek region of the customer. Island regions take longer to reach.}
+      country: {description: Country of the customer.}
+      home_warehouse_id: {description: The DC that serves this customer. All of its orders ship from here.}
+      delivery_window_start: {description: "Earliest time the customer accepts deliveries (HH:MM)."}
+      delivery_window_end: {description: "Latest time the customer accepts deliveries (HH:MM)."}
+      max_pallet_height_cm: {description: Tallest pallet the customer accepts, in cm. Taller pallets may be refused.}
+
+  carriers:
+    description: Transport companies that move shipments.
+    grain: one row per carrier
+    columns:
+      carrier_id: {description: "Carrier code, e.g. CAR03."}
+      carrier_name: {description: Carrier name.}
+      mode:
+        description: Full truck load, part load, or parcel.
+        values: [FTL, LTL, parcel]
+      cost_per_pallet:
+        description: Contracted price per pallet in EUR.
+        sensitive: true
+
+  production_batches:
+    description: Batches made at the plant. Every case in the network comes from one of these batches.
+    grain: one row per batch
+    columns:
+      batch_lot: {description: "Batch code, e.g. L25134-HAI-007. Digits after L are the year (2 digits) and day of the year it was made."}
+      sku: {description: Product made.}
+      warehouse_id: {description: Site that made it (always the plant).}
+      produced_at: {description: "When the batch was made. Opening stock was made in December 2024."}
+      qty_cases: {description: Cases made in the batch.}
+      best_before_date: {description: Best-before date of the batch.}
+
+  orders:
+    description: Customer orders (header).
+    grain: one row per customer order
+    columns:
+      order_id: {description: "Order number, e.g. O-000123."}
+      customer_id: {description: Customer who ordered.}
+      warehouse_id: {description: DC that ships the order (the customer's home DC).}
+      order_date: {description: When the order was placed.}
+      requested_delivery_date: {description: Date the customer wants the delivery.}
+      cutoff_time: {description: Latest time the order should leave the DC.}
+      status:
+        description: Order status at the end of 2025.
+        values: [open, picked, shipped, delivered, cancelled]
+
+  order_lines:
+    description: Products and quantities in each customer order.
+    grain: one row per product in an order
+    columns:
+      order_line_id: {description: Order line number.}
+      order_id: {description: Order the line belongs to.}
+      sku: {description: Product ordered.}
+      qty_ordered_cases: {description: Cases the customer ordered.}
+      qty_shipped_cases: {description: "Cases actually shipped. Lower than ordered means short shipped (not enough stock)."}
+
+  stock_transfers:
+    description: Stock moving between company sites - plant to DC, or DC to DC. Outbound for the sending site, inbound for the receiving site.
+    grain: one row per transfer
+    columns:
+      transfer_id: {description: "Transfer number, e.g. T-00042."}
+      from_warehouse_id: {description: Sending site.}
+      to_warehouse_id: {description: Receiving site (always a DC).}
+      created_at: {description: When the transfer was raised.}
+      requested_arrival_date: {description: Date the receiving DC needs the stock.}
+      reason:
+        description: "Why the stock moves. replenishment and peak build-up come from the plant; rebalancing is DC to DC."
+        values: [replenishment, rebalancing, peak build-up, consolidation]
+      status:
+        description: Transfer status at the end of 2025.
+        values: [open, shipped, received, cancelled]
+
+  stock_transfer_lines:
+    description: Products and quantities in each transfer.
+    grain: one row per product in a transfer
+    columns:
+      transfer_line_id: {description: Transfer line number.}
+      transfer_id: {description: Transfer the line belongs to.}
+      sku: {description: Product moved.}
+      qty_requested_cases: {description: Cases the receiving DC asked for.}
+      qty_shipped_cases: {description: Cases the sending site actually loaded.}
+      qty_received_cases: {description: "Cases that arrived. Lower than shipped means cases were lost in transit. 0 while still on the road."}
+
+  customer_returns:
+    description: Goods coming back from customers (header).
+    grain: one row per return
+    columns:
+      return_id: {description: "Return number, e.g. R-00017."}
+      customer_id: {description: Customer returning the goods.}
+      warehouse_id: {description: DC that receives the return (the customer's home DC).}
+      original_order_id: {description: Order the goods were delivered on.}
+      return_type:
+        description: "refused at delivery = the customer refused pallets when the truck arrived; they went back on the same truck. later return = goods sent back days later and collected separately."
+        values: [refused at delivery, later return]
+      requested_at: {description: When the return was raised (for refusals, the delivery time).}
+      reason_code:
+        description: Why the goods came back.
+        values: [damaged, wrong product, short dated, overstock, quality complaint, delivered late, pallet too tall]
+      status:
+        description: Return status at the end of 2025.
+        values: [requested, approved, collected, received, inspected, closed, rejected]
+
+  customer_return_lines:
+    description: Products, batches and quantities in each return, with the inspection result.
+    grain: one row per product and batch in a return
+    columns:
+      return_line_id: {description: Return line number.}
+      return_id: {description: Return the line belongs to.}
+      original_order_line_id: {description: Order line the goods were delivered on.}
+      sku: {description: Product returned.}
+      batch_lot: {description: Batch of the returned goods.}
+      qty_requested_cases: {description: Cases the customer said they were returning.}
+      qty_received_cases: {description: Cases that actually arrived at the DC. 0 until received.}
+      condition:
+        description: Result of inspection at the DC. NULL until inspected.
+        values: [sellable, damaged packaging, damaged product, expired]
+      disposition:
+        description: What happened to the goods after inspection. NULL until inspected.
+        values: [restock, rework, destroy, return to plant]
+      inspected_at: {description: When the goods were inspected.}
+
+  shipments:
+    description: Truck loads. One table for customer deliveries, stock transfers and customer return collections.
+    grain: one row per truck load
+    columns:
+      shipment_id: {description: "Shipment number, e.g. S-000456."}
+      shipment_type:
+        description: What the truck carries. Exactly one of order_id, transfer_id, return_id is filled, matching this.
+        values: [customer delivery, stock transfer, customer return]
+      order_id: {description: Order delivered. Only for customer deliveries.}
+      transfer_id: {description: Transfer moved. Only for stock transfers. A large transfer can need several trucks.}
+      return_id: {description: Return collected. Only for customer returns (later returns).}
+      carrier_id: {description: Carrier that drove the truck.}
+      origin_warehouse_id: {description: Site the truck left from. NULL for customer returns.}
+      origin_customer_id: {description: Customer the truck left from. Only for customer returns.}
+      destination_warehouse_id: {description: Site the truck went to. NULL for customer deliveries.}
+      planned_ship_at: {description: Planned departure.}
+      actual_ship_at: {description: Actual departure.}
+      planned_delivery_at: {description: "Booked delivery time. For customer deliveries this is the slot agreed with the customer."}
+      actual_delivery_at: {description: "Actual delivery (unloading finished). NULL if still on the road at the end of 2025."}
+      status:
+        description: Shipment status at the end of 2025.
+        values: [planned, loaded, in transit, delivered, failed]
+
+  shipment_events:
+    description: Timeline of each truck - departure, delays, arrival, delivery.
+    grain: one row per event
+    columns:
+      event_id: {description: Event id.}
+      shipment_id: {description: Shipment the event belongs to.}
+      event_type:
+        values: [departed, delayed, arrived, delivered, failed delivery]
+      event_at: {description: When it happened.}
+      reason_code:
+        description: Reason for a delay. NULL for other events.
+        values: [traffic, truck breakdown, driver hours, ferry delay, late loading, held at origin]
+      location: {description: Where it happened (site city, customer region, or 'en route').}
+
+  pallets:
+    description: Physical pallets, each identified by its SSCC barcode.
+    grain: one row per pallet
+    columns:
+      sscc: {description: 18-digit Serial Shipping Container Code printed on the pallet label. The last digit is a GS1 check digit.}
+      shipment_id: {description: Truck the pallet travels on.}
+      warehouse_id: {description: Site where the pallet was built.}
+      built_at: {description: When the pallet was built and labelled.}
+      pallet_type:
+        description: One product on the pallet, or several.
+        values: [single-SKU, mixed]
+      height_cm: {description: "Pallet height in cm, including the pallet base. Compare with customers.max_pallet_height_cm."}
+      gross_weight_kg: {description: Total weight in kg, including the pallet.}
+
+  pallet_contents:
+    description: What is on each pallet, down to batch. A mixed pallet has several rows.
+    grain: one row per product and batch on a pallet
+    columns:
+      sscc: {description: Pallet.}
+      sku: {description: Product.}
+      order_line_id: {description: Customer order line these cases serve.}
+      transfer_line_id: {description: Transfer line these cases serve.}
+      return_line_id: {description: "Return line these cases belong to (pallets rebuilt at the DC for later returns)."}
+      qty_cases: {description: Cases of this product and batch on the pallet.}
+      batch_lot: {description: Production batch of the cases.}
+      best_before_date: {description: Best-before date of the batch.}
+
+  pallet_events:
+    description: Every barcode scan of a pallet.
+    grain: one row per scan
+    columns:
+      event_id: {description: Scan id.}
+      sscc: {description: Pallet scanned.}
+      event_type:
+        description: "built, staged, loaded and departed happen at the sending site; received, damaged and rejected at the destination. A refused pallet is scanned rejected at the customer, then received back at its DC."
+        values: [built, staged, loaded, departed, received, damaged, rejected]
+      event_at: {description: When the scan happened.}
+      location: {description: Where the scan happened.}
+      scanned_by: {description: "Scanner device (e.g. ATH-RF03) or driver handheld (e.g. DRV-CAR03)."}
+
+  inventory:
+    description: End-of-day stock per product at every site.
+    grain: one row per day, site and product
+    columns:
+      snapshot_date: {description: Day of the snapshot.}
+      warehouse_id: {description: Site.}
+      sku: {description: Product.}
+      qty_on_hand_cases: {description: Cases physically in stock at the end of the day.}
+      qty_allocated_cases: {description: Cases of that stock already reserved for orders and transfers due to ship.}
+
+  dock_appointments:
+    description: Booked truck slots at dock doors, for loading (outbound) and unloading (inbound).
+    grain: one row per booking
+    columns:
+      appointment_id: {description: Booking id.}
+      warehouse_id: {description: Site of the dock.}
+      dock_door: {description: "Door code, e.g. D04."}
+      direction:
+        values: [inbound, outbound]
+      shipment_id: {description: Shipment loaded or unloaded.}
+      carrier_id: {description: Carrier of the truck.}
+      truck_plate: {description: Registration plate.}
+      slot_start: {description: Start of the booked one-hour slot.}
+      slot_end: {description: End of the booked slot.}
+      checked_in_at: {description: When the truck arrived at the gate. NULL for no-shows.}
+      dock_start_at: {description: When loading or unloading started.}
+      dock_end_at: {description: When loading or unloading finished.}
+      status:
+        description: "no-show = the truck never came; the shipment was then rebooked in a new slot."
+        values: [booked, arrived, in progress, completed, no-show, cancelled, rescheduled]
+      delay_reason_code:
+        description: Reason the truck was late or waited.
+        values: [truck late, dock busy, goods not ready]
+
+relationships:
+  - customers.home_warehouse_id = warehouses.warehouse_id
+  - production_batches.sku = products.sku
+  - production_batches.warehouse_id = warehouses.warehouse_id
+  - orders.customer_id = customers.customer_id
+  - orders.warehouse_id = warehouses.warehouse_id
+  - order_lines.order_id = orders.order_id
+  - order_lines.sku = products.sku
+  - stock_transfers.from_warehouse_id = warehouses.warehouse_id
+  - stock_transfers.to_warehouse_id = warehouses.warehouse_id
+  - stock_transfer_lines.transfer_id = stock_transfers.transfer_id
+  - stock_transfer_lines.sku = products.sku
+  - customer_returns.customer_id = customers.customer_id
+  - customer_returns.warehouse_id = warehouses.warehouse_id
+  - customer_returns.original_order_id = orders.order_id
+  - customer_return_lines.return_id = customer_returns.return_id
+  - customer_return_lines.original_order_line_id = order_lines.order_line_id
+  - customer_return_lines.sku = products.sku
+  - customer_return_lines.batch_lot = production_batches.batch_lot
+  - shipments.order_id = orders.order_id
+  - shipments.transfer_id = stock_transfers.transfer_id
+  - shipments.return_id = customer_returns.return_id
+  - shipments.carrier_id = carriers.carrier_id
+  - shipments.origin_warehouse_id = warehouses.warehouse_id
+  - shipments.origin_customer_id = customers.customer_id
+  - shipments.destination_warehouse_id = warehouses.warehouse_id
+  - shipment_events.shipment_id = shipments.shipment_id
+  - pallets.shipment_id = shipments.shipment_id
+  - pallets.warehouse_id = warehouses.warehouse_id
+  - pallet_contents.sscc = pallets.sscc
+  - pallet_contents.sku = products.sku
+  - pallet_contents.order_line_id = order_lines.order_line_id
+  - pallet_contents.transfer_line_id = stock_transfer_lines.transfer_line_id
+  - pallet_contents.return_line_id = customer_return_lines.return_line_id
+  - pallet_contents.batch_lot = production_batches.batch_lot
+  - pallet_events.sscc = pallets.sscc
+  - inventory.warehouse_id = warehouses.warehouse_id
+  - inventory.sku = products.sku
+  - dock_appointments.warehouse_id = warehouses.warehouse_id
+  - dock_appointments.shipment_id = shipments.shipment_id
+  - dock_appointments.carrier_id = carriers.carrier_id
+
+business_terms:
+  DC: Distribution centre - ATH (Athens), THE (Thessaloniki), PAT (Patras).
+  plant: The factory, PLT (Oinofyta). It ships only to DCs, never to customers.
+  outbound from a site: Shipments with origin_warehouse_id = that site.
+  inbound to a site: Shipments with destination_warehouse_id = that site (stock transfers and customer return collections).
+  transfer: A row in stock_transfers. Plant-to-DC transfers have reason replenishment or peak build-up; DC-to-DC transfers have reason rebalancing.
+  SSCC: The 18-digit pallet barcode, pallets.sscc.
+  batch / lot: A production batch, production_batches.batch_lot.
+  trace a batch: Follow batch_lot through pallet_contents to pallets, shipments and orders to find who received it.
+  short shipped: An order line with qty_shipped_cases < qty_ordered_cases.
+  stockout: A product with qty_on_hand_cases = 0 at a site on a day (inventory).
+  refusal / refused pallet: A pallet with a 'rejected' scan in pallet_events; it also appears as a return with return_type 'refused at delivery'.
+  transit loss: Transfer cases shipped but not received (qty_shipped_cases - qty_received_cases on received transfers).
+  missed cut-off: A customer delivery whose actual_ship_at is later than orders.cutoff_time.
+  dock wait: Minutes from checked_in_at to dock_start_at.
+  no-show: A dock appointment with status 'no-show'.
+
+data_quality:
+  - Pallet scans can be duplicated. Count distinct pallets (COUNT(DISTINCT sscc)) rather than scan rows.
+  - Some scans may be missing, e.g. a pallet that departed without a 'loaded' scan, or a transfer pallet with no 'received' scan.
+  - A few SSCCs have an invalid GS1 check digit.
+  - On some return lines the received quantity differs from what the customer said they returned.
+
+kpis:
+  on_time_delivery:
+    name: On-time delivery rate
+    description: Share of customer orders delivered by the booked delivery time, with 30 minutes tolerance.
+    unit: percent
+    better: higher
+    formula: orders delivered on time / orders due
+    rules:
+      - On time means shipments.actual_delivery_at <= planned_delivery_at + 30 minutes.
+      - Orders due = orders with requested_delivery_date in the period. Orders not yet delivered count as not on time.
+    split_by:
+      carrier: shipments.carrier_id
+      DC: orders.warehouse_id
+      customer: orders.customer_id
+      region: customers.region
+      month: strftime('%Y-%m', orders.requested_delivery_date)
+      weekday: strftime('%w', shipments.planned_delivery_at)  # 0 = Sunday, 1 = Monday
+    sql: |
+      SELECT ROUND(100.0 * AVG(s.actual_delivery_at IS NOT NULL
+                               AND s.actual_delivery_at <= datetime(s.planned_delivery_at, '+30 minutes')), 1)
+      FROM orders o
+      LEFT JOIN shipments s ON s.order_id = o.order_id AND s.shipment_type = 'customer delivery'
+      WHERE o.requested_delivery_date <= '2025-12-31'
+
+  in_full:
+    name: In-full rate (order level)
+    description: Share of customer orders where the customer accepted every line in full.
+    unit: percent
+    better: higher
+    formula: orders fully accepted / orders due
+    rules:
+      - An order is in full only if, for every line, accepted cases = ordered cases.
+      - Accepted cases = qty_shipped_cases minus cases on pallets refused at delivery.
+      - Cancelled orders count as not in full.
+      - Orders due = orders with requested_delivery_date in the period.
+    split_by:
+      DC: orders.warehouse_id
+      customer: orders.customer_id
+      month: strftime('%Y-%m', orders.requested_delivery_date)
+      week: strftime('%W', orders.requested_delivery_date)
+    sql: |
+      WITH refused AS (
+        SELECT rl.original_order_line_id AS order_line_id, SUM(rl.qty_requested_cases) AS cases
+        FROM customer_return_lines rl
+        JOIN customer_returns r USING (return_id)
+        WHERE r.return_type = 'refused at delivery'
+        GROUP BY 1
+      ),
+      order_check AS (
+        SELECT o.order_id,
+               o.status <> 'cancelled'
+               AND MIN(ol.qty_shipped_cases - COALESCE(rf.cases, 0) = ol.qty_ordered_cases) AS in_full
+        FROM orders o
+        JOIN order_lines ol USING (order_id)
+        LEFT JOIN refused rf USING (order_line_id)
+        WHERE o.requested_delivery_date <= '2025-12-31'
+        GROUP BY o.order_id
+      )
+      SELECT ROUND(100.0 * AVG(in_full), 1) FROM order_check
+
+  otif:
+    name: OTIF (on time in full)
+    description: Share of customer orders that were both on time and in full. The main KPI retailers score suppliers on.
+    unit: percent
+    better: higher
+    formula: orders on time and in full / orders due
+    rules:
+      - On time and in full exactly as defined in on_time_delivery and in_full.
+    split_by:
+      carrier: shipments.carrier_id
+      DC: orders.warehouse_id
+      customer: orders.customer_id
+      month: strftime('%Y-%m', orders.requested_delivery_date)
+    sql: |
+      WITH refused AS (
+        SELECT rl.original_order_line_id AS order_line_id, SUM(rl.qty_requested_cases) AS cases
+        FROM customer_return_lines rl
+        JOIN customer_returns r USING (return_id)
+        WHERE r.return_type = 'refused at delivery'
+        GROUP BY 1
+      ),
+      order_check AS (
+        SELECT o.order_id,
+               o.status <> 'cancelled'
+               AND MIN(ol.qty_shipped_cases - COALESCE(rf.cases, 0) = ol.qty_ordered_cases) AS in_full,
+               MAX(s.actual_delivery_at IS NOT NULL
+                   AND s.actual_delivery_at <= datetime(s.planned_delivery_at, '+30 minutes')) AS on_time
+        FROM orders o
+        JOIN order_lines ol USING (order_id)
+        LEFT JOIN refused rf USING (order_line_id)
+        LEFT JOIN shipments s ON s.order_id = o.order_id AND s.shipment_type = 'customer delivery'
+        WHERE o.requested_delivery_date <= '2025-12-31'
+        GROUP BY o.order_id
+      )
+      SELECT ROUND(100.0 * AVG(on_time AND in_full), 1) FROM order_check
+
+  pallet_damage_rate:
+    name: Pallet damage rate
+    description: Share of pallets delivered to customers that were scanned as damaged.
+    unit: percent
+    better: lower
+    formula: distinct damaged pallets / distinct pallets delivered to customers
+    rules:
+      - Delivered pallets = pallets on customer delivery shipments with an actual delivery time.
+      - Count distinct SSCCs - scans can be duplicated.
+    split_by:
+      carrier: shipments.carrier_id
+      DC: shipments.origin_warehouse_id
+      customer: orders.customer_id
+      month: strftime('%Y-%m', shipments.actual_delivery_at)
+    sql: |
+      SELECT ROUND(100.0 * COUNT(DISTINCT e.sscc) / COUNT(DISTINCT p.sscc), 2)
+      FROM pallets p
+      JOIN shipments s USING (shipment_id)
+      LEFT JOIN pallet_events e ON e.sscc = p.sscc AND e.event_type = 'damaged'
+      WHERE s.shipment_type = 'customer delivery' AND s.actual_delivery_at IS NOT NULL
+
+  refusal_rate:
+    name: Refusal rate
+    description: Share of pallets delivered to customers that the customer refused.
+    unit: percent
+    better: lower
+    formula: distinct refused pallets / distinct pallets delivered to customers
+    rules:
+      - A refused pallet has a 'rejected' scan.
+      - Count distinct SSCCs - scans can be duplicated.
+    split_by:
+      customer: orders.customer_id
+      carrier: shipments.carrier_id
+      DC: shipments.origin_warehouse_id
+      reason: customer_returns.reason_code
+      month: strftime('%Y-%m', shipments.actual_delivery_at)
+    sql: |
+      SELECT ROUND(100.0 * COUNT(DISTINCT e.sscc) / COUNT(DISTINCT p.sscc), 2)
+      FROM pallets p
+      JOIN shipments s USING (shipment_id)
+      LEFT JOIN pallet_events e ON e.sscc = p.sscc AND e.event_type = 'rejected'
+      WHERE s.shipment_type = 'customer delivery' AND s.actual_delivery_at IS NOT NULL
+
+  dock_wait_time:
+    name: Dock wait time
+    description: Average minutes a truck waits between arriving at the gate and starting to load or unload.
+    unit: minutes
+    better: lower
+    formula: average of (dock_start_at - checked_in_at) in minutes
+    rules:
+      - Completed appointments only, inbound and outbound.
+    split_by:
+      site: dock_appointments.warehouse_id
+      direction: dock_appointments.direction
+      hour of arrival: strftime('%H', dock_appointments.checked_in_at)
+      carrier: dock_appointments.carrier_id
+      month: strftime('%Y-%m', dock_appointments.slot_start)
+    sql: |
+      SELECT ROUND(AVG((julianday(dock_start_at) - julianday(checked_in_at)) * 1440), 1)
+      FROM dock_appointments
+      WHERE status = 'completed'
+
+  no_show_rate:
+    name: No-show rate
+    description: Share of dock appointments where the truck never arrived.
+    unit: percent
+    better: lower
+    formula: no-show appointments / appointments whose slot has passed
+    rules:
+      - Only appointments whose slot ended by the end of the period count.
+    split_by:
+      carrier: dock_appointments.carrier_id
+      site: dock_appointments.warehouse_id
+      month: strftime('%Y-%m', dock_appointments.slot_start)
+    sql: |
+      SELECT ROUND(100.0 * AVG(status = 'no-show'), 2)
+      FROM dock_appointments
+      WHERE slot_end <= '2025-12-31 23:59:59'
+
+  return_rate:
+    name: Return rate
+    description: Cases customers sent back later, as a share of cases delivered.
+    unit: percent
+    better: lower
+    formula: cases in later returns / cases delivered to customers
+    rules:
+      - Later returns only. Refusals at delivery have their own KPI (refusal_rate).
+      - Returned cases = qty_requested_cases on the return lines.
+      - Delivered cases = qty_shipped_cases on orders whose delivery has happened.
+    split_by:
+      customer: customer_returns.customer_id
+      reason: customer_returns.reason_code
+      product: customer_return_lines.sku
+      batch: customer_return_lines.batch_lot
+      month: strftime('%Y-%m', customer_returns.requested_at)
+    sql: |
+      SELECT ROUND(100.0 *
+        (SELECT SUM(rl.qty_requested_cases)
+         FROM customer_return_lines rl
+         JOIN customer_returns r USING (return_id)
+         WHERE r.return_type = 'later return')
+        /
+        (SELECT SUM(ol.qty_shipped_cases)
+         FROM order_lines ol
+         JOIN shipments s ON s.order_id = ol.order_id AND s.shipment_type = 'customer delivery'
+         WHERE s.actual_delivery_at IS NOT NULL), 2)
