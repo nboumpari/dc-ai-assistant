@@ -1,0 +1,30 @@
+# Local services.
+#   docker compose up -d qdrant                      start the vector database
+#   docker compose run --rm app python -m <module>   run project code in Linux (embeddings, rerankers)
+# Qdrant dashboard: http://localhost:6333/dashboard
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.2
+    container_name: dc-ai-qdrant
+    ports:
+      - "6333:6333"   # REST API and dashboard: http://localhost:6333/dashboard
+    volumes:
+      - ./data/index/qdrant:/qdrant/storage
+    restart: unless-stopped
+
+  app:
+    build: .
+    image: dc-ai-assistant:dev
+    profiles: ["tools"]   # not started by `up`; used with `docker compose run`
+    working_dir: /app
+    volumes:
+      - .:/app                 # project code and data (reads .env from here)
+      - hf-models:/models      # Hugging Face model cache, kept between runs
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      - qdrant
+
+volumes:
+  hf-models:

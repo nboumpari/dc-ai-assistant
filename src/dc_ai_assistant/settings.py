@@ -43,3 +43,9 @@ WAREHOUSE_DB_PATH = Path(os.environ.get("WAREHOUSE_DB_PATH", PROJECT_ROOT / "dat
 # SQL tool limits
 SQL_MAX_ROWS = int(os.environ.get("SQL_MAX_ROWS", "200"))
 SQL_TIMEOUT_SECONDS = float(os.environ.get("SQL_TIMEOUT_SECONDS", "10"))
+
+# Vector database (Qdrant REST API). Inside docker compose the app service uses http://qdrant:6333.
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+
+# CPU threads for the local models
+TORCH_THREADS = int(os.environ.get("TORCH_THREADS", "8"))
