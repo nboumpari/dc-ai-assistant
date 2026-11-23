@@ -34,4 +34,10 @@ data/index/
 
 # Saved evaluation runs (the answers quote the documents)
 data/eval_runs/
-
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Local design documents (kept out of the public repo)
+docs/

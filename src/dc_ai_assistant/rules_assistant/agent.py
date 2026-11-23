@@ -170,5 +170,5 @@ def ask(question: str, agent=None) -> dict[str, Any]:
         **response,
         "search_query": state.get("search_query"),
         "passages": [_brief(c) for c in passages],
-        "cited_chunks": [_brief(passages[n - 1]) for n in response["citations"]],
+        "cited_chunks": [{**_brief(passages[n - 1]), "text": passages[n - 1]["text"]} for n in response["citations"]],
     }
