@@ -1,0 +1,113 @@
+# The rules agent's corpus: 7 real, public documents.
+#
+# Files are downloaded from their official sources into data/documents/raw/
+# (gitignored) and never committed: EU law may be reused with attribution,
+# while the GS1, UN and HSE texts allow download and use but not
+# redistribution.
+
+documents:
+  - id: gs1_logistic_label
+    title: GS1 Logistic Label Guideline
+    theme: labels and identification
+    publisher: GS1
+    version: Release 1.3 (July 2019)
+    url: https://ref.gs1.org/guidelines/logistic-label/
+    files: [gs1_logistic_label.pdf]
+    licence: GS1 terms of use - download and use, no redistribution
+
+  - id: gs1_general_specifications
+    title: GS1 General Specifications
+    theme: labels and identification
+    publisher: GS1
+    version: latest release (permanent URL)
+    url: https://ref.gs1.org/standards/genspecs/
+    files: [gs1_general_specifications.pdf]
+    licence: GS1 terms of use - download and use, no redistribution
+    # logistics sections only (section numbers of Release 26.0)
+    sections: [
+      "1.3.5",                                 # SSCC as an identification key
+      "2.2",                                   # logistic units
+      "3.3.1", "3.3.2", "3.3.3",               # AIs (00), (01), (02)
+      "3.4.1", "3.4.2", "3.4.5", "3.4.7",      # AIs (10), (11), (15), (17)
+      "3.6.2", "3.6.3", "3.6.5",               # trade and logistic measures (310n, 330n), AI (37)
+      "3.7.1", "3.7.5", "3.7.13",              # AIs (400), (410), (420)
+      "4.3",                                   # SSCC rules
+      "5.4",                                   # GS1-128 barcode
+      "6.6", "6.7",                            # logistic label design and placement
+      "7.9",                                   # check digit calculation
+      "9.1",                                   # glossary
+    ]
+
+  - id: cmr_convention
+    title: Convention on the Contract for the International Carriage of Goods by Road (CMR)
+    theme: transport
+    publisher: United Nations
+    version: 1956 Geneva text (UN Treaty Series vol. 399, No. 5742); the 1978 protocol is not included
+    url: https://treaties.un.org/doc/Publication/UNTS/Volume%20399/volume-399-I-5742-English.pdf
+    files: [cmr_convention.pdf]
+    licence: UN copyright - download and use, no redistribution
+
+  - id: eu_561_2006
+    title: Regulation (EC) No 561/2006 on driving times and rest periods
+    theme: transport
+    publisher: European Union (EUR-Lex)
+    version: consolidated text of 31 December 2024
+    url: https://eur-lex.europa.eu/eli/reg/2006/561/2024-12-31/eng
+    # EUR-Lex blocks scripts; the Publications Office's Cellar service is the official machine-access channel.
+    # The consolidated text is only available there as XHTML (no page numbers: cite by article).
+    download_url: http://publications.europa.eu/resource/celex/02006R0561-20241231
+    accept: application/xhtml+xml
+    files: [eu_561_2006.xhtml]
+    licence: reuse allowed with acknowledgement (Commission Decision 2011/833/EU)
+
+  - id: hse_hsg76
+    title: "Warehousing and storage: a guide to health and safety (HSG76)"
+    theme: warehouse safety
+    publisher: UK Health and Safety Executive
+    version: second edition (2007)
+    url: https://www.hse.gov.uk/pubns/priced/hsg76.pdf
+    files: [hse_hsg76.pdf]
+    licence: HSE copyright - free download, no redistribution
+
+  - id: adr_2025
+    title: Agreement concerning the International Carriage of Dangerous Goods by Road (ADR 2025)
+    theme: dangerous goods
+    publisher: UNECE
+    version: ADR 2025 (ECE/TRANS/352), applicable from 1 January 2025
+    url: https://unece.org/adr-2025-files
+    files: [adr_2025_vol1.pdf, adr_2025_vol2.pdf]
+    licence: UN copyright - download and use, no redistribution
+    # The PDFs have no table of contents, so each excerpt is cut by page range and start/end heading.
+    # Everything we use is in Volume I (Parts 1-3); Volume II covers Parts 4-9.
+    selections:
+      - {heading: "1.1.3.6 Exemptions related to quantities carried per transport unit", file: adr_2025_vol1.pdf,
+         pages: [29, 31], start: '1\.1\.3\.6', end: '1\.1\.3\.7'}
+      - {heading: "1.2.1 Definitions (selected terms)", file: adr_2025_vol1.pdf, pages: [35, 53],
+         start: '1\.2\.1', end: '1\.2\.2',
+         definitions: [aerosol, limited quantit, package, packaging, receptacle, consignor, consignee, carrier,
+                       transport unit, vehicle, dangerous goods, shrink-wrapped, tray, gas, loader, packer]}
+      - {heading: "2.2.2.1.6 Aerosols", file: adr_2025_vol1.pdf, pages: [159, 160],
+         start: '2\.2\.2\.1\.6', end: '2\.2\.2\.1\.7'}
+      - {heading: "3.2 Dangerous Goods List (Table A): UN 1950 Aerosols", file: adr_2025_vol1.pdf,
+         pages: [404, 405], table_rows: '1950'}
+      - {heading: "3.3.1 Special provision 190", file: adr_2025_vol1.pdf, pages: [613, 613],
+         start: '190 ', end: '191 '}
+      - {heading: "3.3.1 Special provision 327", file: adr_2025_vol1.pdf, pages: [622, 622],
+         start: '327 ', end: '328 '}
+      - {heading: "3.4 Dangerous goods packed in limited quantities", file: adr_2025_vol1.pdf, pages: [663, 667],
+         start: 'CHAPTER 3\.4', end: 'CHAPTER 3\.5'}
+    manual_download: >-
+      UNECE blocks automated downloads. Open the URL in a browser, download
+      Volume I and Volume II (English PDFs) and save them as
+      data/documents/raw/adr_2025_vol1.pdf and data/documents/raw/adr_2025_vol2.pdf.
+
+  - id: eu_gpsr
+    title: Regulation (EU) 2023/988 on general product safety (GPSR)
+    theme: product safety and recalls
+    publisher: European Union (EUR-Lex)
+    version: Official Journal text of 10 May 2023, applicable from 13 December 2024
+    url: https://eur-lex.europa.eu/eli/reg/2023/988/oj/eng
+    download_url: http://publications.europa.eu/resource/celex/32023R0988
+    accept: application/pdf
+    files: [eu_gpsr.pdf]
+    licence: reuse allowed with acknowledgement (Commission Decision 2011/833/EU)

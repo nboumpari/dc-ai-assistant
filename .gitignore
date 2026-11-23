@@ -25,6 +25,9 @@ data/generated/
 
 # Downloaded public documents (fetched by script, not committed)
 data/documents/raw/
+# Extracted text and chunks contain the documents' full text: never commit them either
+data/documents/text/
+data/documents/chunks/
 
 # Vector index
 data/index/
