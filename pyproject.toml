@@ -11,7 +11,10 @@ dependencies = [
     "langgraph>=1.2.24",
     "langsmith>=0.16.0",
     "openai>=3.57.0",
+    "pymupdf>=2.1",
+    "pymupdf4llm>=2.1",
     "pyyaml>=6.0.4",
+    "rank-bm25>=0.2.2",
 ]
 
 [project.scripts]
