@@ -1,4 +1,7 @@
-# The image only needs the dependency files; the project is mounted at run time.
+# The images need only the dependency files and the application code.
+# Data, documents, models and secrets are never copied into an image.
 *
 !pyproject.toml
 !uv.lock
+!src/
+**/__pycache__

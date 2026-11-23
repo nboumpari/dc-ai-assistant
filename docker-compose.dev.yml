@@ -1,0 +1,37 @@
+# Development mode, on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# The API runs from the mounted project folder and reloads when the code changes;
+# the page is served by Vite's dev server on http://localhost:5173 and updates on save.
+
+services:
+  api:
+    build:
+      context: .
+      target: base
+    image: dc-ai-assistant:dev
+    command: uvicorn dc_ai_assistant.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
+    ports:
+      - "8000:8000"
+    volumes: !override
+      - .:/app
+      - hf-models:/models
+
+  web:
+    build: !reset null
+    image: node:22.12.0-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports: !override
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - web-modules:/app/node_modules   # Linux node_modules, kept out of the Windows folder
+    environment:
+      API_URL: http://api:8000
+    healthcheck:
+      disable: true
+
+volumes:
+  web-modules:

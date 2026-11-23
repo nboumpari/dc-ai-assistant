@@ -1,9 +1,14 @@
-# Local services.
-#   docker compose up -d                             start Qdrant, the API and the web page
-#   docker compose run --rm app python -m <module>   run project code in Linux (indexing, evaluations)
-# Chat page:        http://localhost:5173
-# Qdrant dashboard: http://localhost:6333/dashboard
-# API:              http://localhost:8000/api/health
+# The DC AI Assistant: the chat page, the API and the vector database.
+#
+#   docker compose up -d --build        start everything      -> http://localhost:8080
+#   docker compose down                 stop it
+#   docker compose run --rm app ...     setup and evaluation commands (see README)
+#
+# Development (mounted code, auto-reload, Vite dev server on http://localhost:5173):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# The images contain code only. The database, the documents' chunks, the vector index
+# and the models stay on this machine and are mounted in (see README, "Setup").
 
 services:
   qdrant:
@@ -15,26 +20,42 @@ services:
       - ./data/index/qdrant:/qdrant/storage
     restart: unless-stopped
 
-  app:
-    build: .
-    image: dc-ai-assistant:dev
-    profiles: ["tools"]   # not started by `up`; used with `docker compose run`
-    working_dir: /app
-    volumes:
-      - .:/app                 # project code and data (reads .env from here)
-      - hf-models:/models      # Hugging Face model cache, kept between runs
+  api:
+    build:
+      context: .
+      target: runtime
+    image: dc-ai-assistant-api:latest
+    container_name: dc-ai-api
+    env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
+      HF_HUB_OFFLINE: "1"   # the models were downloaded during setup
+    volumes:
+      - ./data:/app/data:ro
+      - hf-models:/models
     depends_on:
       - qdrant
+    restart: unless-stopped
 
-  api:
-    image: dc-ai-assistant:dev
-    container_name: dc-ai-api
-    working_dir: /app
-    command: uvicorn dc_ai_assistant.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
+  web:
+    build: ./frontend
+    image: dc-ai-assistant-web:latest
+    container_name: dc-ai-web
     ports:
-      - "8000:8000"
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # setup and evaluation commands, with the project folder mounted: docker compose run --rm app ...
+  app:
+    build:
+      context: .
+      target: base
+    image: dc-ai-assistant:dev
+    profiles: ["tools"]
+    working_dir: /app
     volumes:
       - .:/app
       - hf-models:/models
@@ -43,21 +64,5 @@ services:
     depends_on:
       - qdrant
 
-  web:
-    image: node:22.12.0-alpine
-    container_name: dc-ai-web
-    working_dir: /app
-    command: sh -c "npm install && npm run dev"
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - web-modules:/app/node_modules   # Linux node_modules, kept out of the Windows folder
-    environment:
-      API_URL: http://api:8000
-    depends_on:
-      - api
-
 volumes:
   hf-models:
-  web-modules:

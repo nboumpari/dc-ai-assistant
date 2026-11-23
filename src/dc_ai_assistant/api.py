@@ -23,7 +23,9 @@ server keeps no session state.
 """
 
 import json
+import threading
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from functools import cache
 from typing import Literal
 
@@ -62,7 +64,26 @@ def supervisor():
     return build_supervisor()
 
 
-app = FastAPI(title="DC AI Assistant", version="0.1.0")
+def _warm_up() -> None:
+    """Load the local models now, so the first rules question does not wait for them."""
+    try:
+        from dc_ai_assistant.rules_assistant import models
+        from dc_ai_assistant.rules_assistant.agent import RETRIEVAL
+
+        models.embed_query(RETRIEVAL.embedder, "warm-up")
+        if RETRIEVAL.reranker:
+            models.rerank_scores(RETRIEVAL.reranker, "warm-up", ["warm-up"])
+    except Exception:  # the models are loaded again on first use; startup never fails because of this
+        pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=_warm_up, daemon=True).start()  # in the background: the API is up at once
+    yield
+
+
+app = FastAPI(title="DC AI Assistant", version="0.1.0", lifespan=lifespan)
 
 
 def _event(name: str, data: dict) -> str:
