@@ -1,5 +1,7 @@
 # DC AI Assistant
 
+[![CI](https://github.com/nboumpari/dc-ai-assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nboumpari/dc-ai-assistant/actions/workflows/ci.yml)
+
 A chat assistant for the control tower of a fictional FMCG manufacturer (one plant, three distribution centres in Greece). A supervisor sends each question to one of two agents:
 
 | | Data agent | Rules agent |
