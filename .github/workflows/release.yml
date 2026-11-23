@@ -1,0 +1,63 @@
+# Continuous delivery: when a version tag is pushed (git tag v1.0.0 && git push --tags),
+# build the API and web images and publish them to the GitHub Container Registry:
+#
+#   ghcr.io/<owner>/dc-ai-assistant-api:<version> and :latest
+#   ghcr.io/<owner>/dc-ai-assistant-web:<version> and :latest
+#
+# The images hold code only, never the documents or data (see Dockerfile), so they
+# can be published. Run a release with docker compose (see README, "Run a release").
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: dc-ai-assistant-api
+            context: .
+            target: runtime
+          - image: dc-ai-assistant-web
+            context: frontend
+            target: runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build and publish
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

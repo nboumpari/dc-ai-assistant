@@ -87,6 +87,25 @@ docker compose up -d --build
 
 Open http://localhost:8080. The answer streams each step of the graph while it works ("Searching the documents", "Running SQL", ...), rules answers cite their sources, and each citation opens the passage it refers to.
 
+### Run a release
+
+Every version tag (`v1.0.0`, ...) publishes the API and web images to the GitHub Container Registry. To run one without building, after the setup steps above, put the image names in `.env`:
+
+```
+API_IMAGE=ghcr.io/nboumpari/dc-ai-assistant-api:1.0.0
+WEB_IMAGE=ghcr.io/nboumpari/dc-ai-assistant-web:1.0.0
+```
+
+```powershell
+docker compose pull api web
+```
+
+```powershell
+docker compose up -d
+```
+
+### Development
+
 For development (mounted code, auto-reload, the page on http://localhost:5173):
 
 ```powershell
@@ -120,6 +139,11 @@ Unit tests (no API calls):
 ```powershell
 uv run pytest
 ```
+
+## CI/CD
+
+- **CI** (`.github/workflows/ci.yml`), on every push to `main` and every pull request: ruff lint and format check, the unit tests, a production build of the frontend, and a build of both Docker images. It needs no secrets.
+- **CD** (`.github/workflows/release.yml`), on every version tag: builds both images and publishes them to the GitHub Container Registry, tagged with the version and `latest`.
 
 ## Project layout
 

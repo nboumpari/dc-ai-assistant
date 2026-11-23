@@ -24,7 +24,7 @@ services:
     build:
       context: .
       target: runtime
-    image: dc-ai-assistant-api:latest
+    image: ${API_IMAGE:-dc-ai-assistant-api:latest}   # or a published release (see README)
     container_name: dc-ai-api
     env_file: .env
     environment:
@@ -39,7 +39,7 @@ services:
 
   web:
     build: ./frontend
-    image: dc-ai-assistant-web:latest
+    image: ${WEB_IMAGE:-dc-ai-assistant-web:latest}
     container_name: dc-ai-web
     ports:
       - "8080:80"
