@@ -5,7 +5,7 @@ Run the agent inside Docker (it needs the local models and Qdrant):
     docker compose run --rm app python -m evals.rules.run_rag_eval --label v1              # dev split
     docker compose run --rm app python -m evals.rules.run_rag_eval --label v1 --split test # final score only
 
-The label names the prompt version (see src/dc_ai_assistant/rules_assistant/prompts/CHANGELOG.md).
+The label names the version of the prompts (reformulate.md and answer.md).
 Every question is run --repetitions times, because answers vary between runs.
 Each run is saved to data/eval_runs/rules-agent-<label>-<split>.jsonl as soon as
 it finishes, so an interrupted evaluation continues where it stopped. A file
@@ -33,14 +33,7 @@ from statistics import mean
 
 from langsmith import Client
 
-from dc_ai_assistant.rules_assistant.agent import (
-    ANSWER_PROMPT,
-    REFORMULATE_PROMPT,
-    RETRIEVAL,
-    ask,
-    build_rules_agent,
-)
-from dc_ai_assistant.rules_assistant.retrieval import RetrievalConfig, all_configs
+from dc_ai_assistant.rules_assistant.agent import ANSWER_PROMPT, REFORMULATE_PROMPT, ask, build_rules_agent
 from evals.rules.retrieval_metrics import coverage_at, hit_at
 from evals.rules.upload_golden_set import DATASET_NAME
 
@@ -73,12 +66,10 @@ def code_scores(output: dict, reference: dict) -> dict:
     return scores
 
 
-def run(label: str, split: str, repetitions: int, config: RetrievalConfig = RETRIEVAL) -> Path:
+def run(label: str, split: str, repetitions: int) -> Path:
     examples = sorted(
         Client().list_examples(dataset_name=DATASET_NAME, splits=[split]), key=lambda e: e.metadata["golden_id"]
     )
-    if config != RETRIEVAL:  # runs with another retriever are saved under their own name
-        label = f"{label}-{config.name}"
     path = runs_path(label, split)
     path.parent.mkdir(parents=True, exist_ok=True)
     done = load_runs(path)
@@ -87,7 +78,7 @@ def run(label: str, split: str, repetitions: int, config: RetrievalConfig = RETR
         raise SystemExit(f"{path.name} was made with other prompts ({done[0]['prompt_version']}); use a new label")
     finished = {(r["golden_id"], r["repetition"]) for r in done}
 
-    agent = build_rules_agent(config=config)
+    agent = build_rules_agent()
     todo = [(e, rep) for rep in range(1, repetitions + 1) for e in examples]
     todo = [(e, rep) for e, rep in todo if (e.metadata["golden_id"], rep) not in finished]
     print(f"{len(examples)} {split} questions x {repetitions} repetitions: {len(todo)} runs to do", flush=True)
@@ -110,7 +101,6 @@ def run(label: str, split: str, repetitions: int, config: RetrievalConfig = RETR
                 "latency_s": round(time.perf_counter() - start, 2),
                 "scores": code_scores(output, example.outputs),
                 "prompt_version": version,
-                "retrieval": config.name,
                 "label": label,
                 "split": split,
             }
@@ -161,19 +151,11 @@ def summarise(path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--label", required=True, help="prompt version, e.g. v1 (see prompts/CHANGELOG.md)")
+    parser.add_argument("--label", required=True, help="version of the prompts, e.g. v2")
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--repetitions", type=int, default=3, help="runs per question (answers vary between runs)")
-    parser.add_argument(
-        "--retrieval",
-        default=RETRIEVAL.name,
-        help=f"retrieval config name from the benchmark (default: the agent's own, {RETRIEVAL.name})",
-    )
     args = parser.parse_args()
-    configs = {c.name: c for c in all_configs()}
-    if args.retrieval not in configs:
-        raise SystemExit(f"unknown retrieval config {args.retrieval}; see evals/rules/retrieval_results.md")
-    summarise(run(args.label, args.split, args.repetitions, configs[args.retrieval]))
+    summarise(run(args.label, args.split, args.repetitions))
     return 0
 
 

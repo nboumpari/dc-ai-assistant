@@ -5,7 +5,7 @@ Run from the project root (only the router runs, no agent, so no Docker needed):
     uv run python -m evals.supervisor.run_router_eval --label v1              # dev split
     uv run python -m evals.supervisor.run_router_eval --label v1 --split test # final score only
 
-The label names the prompt version (see src/dc_ai_assistant/supervisor/prompts/CHANGELOG.md).
+The label names the version of the router prompt (supervisor/prompts/router.md).
 
 Questions and their expected route come from three files:
   evals/golden_set.yaml              the data agent's golden set
@@ -139,7 +139,7 @@ def report(path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--label", required=True, help="prompt version, e.g. v1 (see prompts/CHANGELOG.md)")
+    parser.add_argument("--label", required=True, help="version of the router prompt, e.g. v3")
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--repetitions", type=int, default=3, help="runs per question (the route can vary)")
     args = parser.parse_args()

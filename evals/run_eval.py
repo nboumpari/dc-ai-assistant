@@ -5,8 +5,8 @@ Run from the project root:
     uv run python -m evals.run_eval --label v2               # dev split (use while improving the prompt)
     uv run python -m evals.run_eval --label v2 --split test  # test split (final score only)
 
-The label names the prompt version (see prompts/CHANGELOG.md) and appears in
-the experiment name, e.g. data-agent-v2-dev-1a2b3c4d.
+The label names the version of the prompt (prompts/system.md and the semantic
+layer) and appears in the experiment name, e.g. data-agent-v2-dev-1a2b3c4d.
 
 Scoring looks at results only, never at the wording of the answer:
 
@@ -60,7 +60,7 @@ def behavior_match(outputs: dict, reference_outputs: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--label", required=True, help="prompt version, e.g. v2 (see prompts/CHANGELOG.md)")
+    parser.add_argument("--label", required=True, help="version of the prompt, e.g. v4")
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--repetitions", type=int, default=3, help="runs per question (answers vary between runs)")
     args = parser.parse_args()

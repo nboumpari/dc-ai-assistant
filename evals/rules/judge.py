@@ -37,7 +37,7 @@ import requests
 
 from dc_ai_assistant import settings  # noqa: F401  (loads .env, e.g. GEMINI_API_KEY)
 from dc_ai_assistant.rules_assistant import retrieval
-from dc_ai_assistant.rules_assistant.agent import format_passages
+from dc_ai_assistant.rules_assistant.agent import RETRIEVAL, format_passages
 from evals.rules.run_rag_eval import load_runs, runs_path
 
 JUDGE_MODEL = "gemini-3.8-flash"
@@ -64,7 +64,7 @@ def judge_path(label: str, split: str) -> Path:
 
 
 def judge_input(run: dict) -> str:
-    chunks = {c["chunk_id"]: c for chunking in retrieval.CHUNKINGS for c in retrieval.load_chunks(chunking)}
+    chunks = {c["chunk_id"]: c for c in retrieval.load_chunks(RETRIEVAL.chunking)}
     passages = [chunks[p["chunk_id"]] for p in run["output"]["passages"]]
     return (
         f"Question:\n{run['question']}\n\n"
