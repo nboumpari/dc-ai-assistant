@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 
 from dc_ai_assistant.rules_assistant import models, vector_store
+from dc_ai_assistant.rules_assistant.retrieval import passage
 
 ROOT = Path(__file__).resolve().parents[2]
 CHUNK_DIR = ROOT / "data" / "documents" / "chunks"
@@ -34,10 +35,6 @@ EMBEDDING_DIR = ROOT / "data" / "index" / "embeddings"
 STRATEGIES = ["fixed", "recursive", "structure"]
 EMBEDDERS = ["gemma", "granite"]
 BATCH = 64  # chunks embedded, saved and written to Qdrant at a time
-
-
-def passage(chunk: dict) -> str:
-    return f"{chunk['context']}\n\n{chunk['text']}"
 
 
 def load_chunks(strategy: str) -> list[dict]:

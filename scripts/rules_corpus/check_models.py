@@ -19,16 +19,13 @@ import numpy as np
 import yaml
 
 from dc_ai_assistant.rules_assistant import models
+from dc_ai_assistant.rules_assistant.retrieval import passage
 
 ROOT = Path(__file__).resolve().parents[2]
 CHUNKS = ROOT / "data" / "documents" / "chunks" / "structure.jsonl"
 GOLDEN = ROOT / "evals" / "rules" / "golden_set.yaml"
 QUESTION_IDS = ["R04", "R14", "R18", "R39", "R44"]
 DISTRACTORS = 7
-
-
-def passage(chunk: dict) -> str:
-    return f"{chunk['context']}\n\n{chunk['text']}"
 
 
 def main() -> int:
