@@ -32,5 +32,6 @@ data/documents/chunks/
 # Vector index
 data/index/
 
-# Local design documents (kept out of the public repo)
-docs/
+# Saved evaluation runs (the answers quote the documents)
+data/eval_runs/
+
