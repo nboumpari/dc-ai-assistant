@@ -69,18 +69,14 @@ def _unchanged(existing, wanted: dict) -> bool:
     )
 
 
-def main() -> int:
-    if not EXPECTED_PATH.exists():
-        print("Run first: uv run python -m evals.build_golden_set", file=sys.stderr)
-        return 1
-    wanted = {item["id"]: to_example(item) for item in json.loads(EXPECTED_PATH.read_text(encoding="utf-8"))}
-
+def sync_dataset(name: str, description: str, wanted: dict[str, dict]) -> None:
+    """Make the LangSmith dataset match `wanted` ({golden_id: example}), matching examples by golden_id."""
     client = Client()
-    if client.has_dataset(dataset_name=DATASET_NAME):
-        dataset = client.read_dataset(dataset_name=DATASET_NAME)
+    if client.has_dataset(dataset_name=name):
+        dataset = client.read_dataset(dataset_name=name)
     else:
-        dataset = client.create_dataset(DATASET_NAME, description=DATASET_DESCRIPTION)
-        print(f"Created dataset '{DATASET_NAME}'")
+        dataset = client.create_dataset(name, description=description)
+        print(f"Created dataset '{name}'")
 
     existing = {(ex.metadata or {}).get("golden_id"): ex for ex in client.list_examples(dataset_id=dataset.id)}
 
@@ -100,8 +96,16 @@ def main() -> int:
             client.delete_example(ex.id)
             deleted += 1
 
-    print(f"Dataset '{DATASET_NAME}' ({dataset.id})")
+    print(f"Dataset '{name}' ({dataset.id})")
     print(f"  created {created}, updated {updated}, unchanged {unchanged}, deleted {deleted}")
+
+
+def main() -> int:
+    if not EXPECTED_PATH.exists():
+        print("Run first: uv run python -m evals.build_golden_set", file=sys.stderr)
+        return 1
+    wanted = {item["id"]: to_example(item) for item in json.loads(EXPECTED_PATH.read_text(encoding="utf-8"))}
+    sync_dataset(DATASET_NAME, DATASET_DESCRIPTION, wanted)
     return 0
 
 
